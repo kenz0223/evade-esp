@@ -1,6 +1,8 @@
 --[[
-	Fixed Combined Script: Custom Timer + Box ESP + Downed Tracers (WORKING!)
-	All features fully functional together
+	Fixed Combined Script: Custom Timer + Player Box ESP + Downed Tracers + Nextbot ESP
+	- Nextbot ESP: Identical to player ESP (red, see-through boxes, name + distance)
+	- INSERT: Toggle Player Box ESP
+	- DELETE: Toggle Downed Tracers + Nextbot ESP ****NEXTBOX ESP NOT WORKING****
 ]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -32,8 +34,7 @@ if not allowedGames[game.PlaceId] then
     return
 end
 
--- ====================== CUSTOM EVADE TIMER ======================
-
+-- ====================== CUSTOM EVADE TIMER (UNCHANGED) ======================
 local existingTimer = PlayerGui:FindFirstChild("CustomEvadeTimer")
 if existingTimer then existingTimer:Destroy() end
 
@@ -197,16 +198,16 @@ if BORDER_GLOW then
     end)
 end
 
--- Hide original timers loop
+-- Hide original timers
 task.spawn(function()
     while TimerGui and TimerGui.Parent do
         pcall(function()
             local round = PlayerGui:FindFirstChild("Shared") 
-                and PlayerGui.Shared:FindFirstChild("HUD")
-                and PlayerGui.Shared.HUD:FindFirstChild("Overlay")
-                and PlayerGui.Shared.HUD.Overlay:FindFirstChild("Default")
-                and PlayerGui.Shared.HUD.Overlay.Default:FindFirstChild("RoundOverlay")
-                and PlayerGui.Shared.HUD.Overlay.Default.RoundOverlay:FindFirstChild("Round")
+                and PlayerGui.Shared.HUD
+                and PlayerGui.Shared.HUD.Overlay
+                and PlayerGui.Shared.HUD.Overlay.Default
+                and PlayerGui.Shared.HUD.Overlay.Default.RoundOverlay
+                and PlayerGui.Shared.HUD.Overlay.Default.RoundOverlay.Round
             if round then
                 if not round:FindFirstChild("RoundTimer") then
                     local dummy = Instance.new("TextLabel")
@@ -218,15 +219,15 @@ task.spawn(function()
             end
         end)
         pcall(function()
-            local intermissionTimer = PlayerGui:FindFirstChild("Menu") and PlayerGui.Menu:FindFirstChild("IntermissionTimer")
-            if intermissionTimer then
-                if not intermissionTimer:FindFirstChild("RoundTimer") then
+            local inter = PlayerGui:FindFirstChild("Menu") and PlayerGui.Menu:FindFirstChild("IntermissionTimer")
+            if inter then
+                if not inter:FindFirstChild("RoundTimer") then
                     local dummy = Instance.new("TextLabel")
                     dummy.Name = "RoundTimer"
-                    dummy.Parent = intermissionTimer
+                    dummy.Parent = inter
                     dummy.Visible = false
                 end
-                intermissionTimer.Visible = false
+                inter.Visible = false
             end
         end)
         task.wait(0.5)
@@ -235,18 +236,19 @@ end)
 
 print("✓ Custom Evade Timer Loaded")
 
--- ====================== ESP + TRACERS (SEPARATE ENABLE STATES) ======================
+-- ====================== ESP + TRACERS + NEXTBOT ESP ======================
 
-local BoxESPEnabled = true
-local TracerEnabled = true
+local PlayerBoxESPEnabled = true
+local MiscESPEnabled = true  -- Controls downed tracers + nextbot ESP
 
-local BoxESPObjects = {}
-local TracerCache = {}
+local PlayerBoxESPObjects = {}
+local DownedTracerCache = {}
+local NextbotESPObjects = {}
 
--- Box ESP Settings
-local BoxSettings = {
-    BoxColor = Color3.fromRGB(255, 0, 0),
-    BoxTransparency = 0.4,
+-- Shared ESP Settings (same for players and nextbots)
+local ESPSettings = {
+    BoxColor = Color3.fromRGB(255, 0, 0),  -- Red
+    BoxTransparency = 0.5,  -- See-through
     OutlineTransparency = 0,
     TextTransparency = 0.7,
     TextSize = 16,
@@ -254,7 +256,7 @@ local BoxSettings = {
     WidthRatio = 0.5,
     HeightMultiplier = 1.0,
     TextOutline = true,
-    TeamCheck = false
+    TeamCheck = false  -- Only applies to players
 }
 
 local Colors = {
@@ -265,7 +267,7 @@ local Colors = {
 local ColorNames = {"Red","Lime","Blue","Yellow","Cyan","Magenta","White","Gray"}
 local ColorIndex = 1
 
--- Tracer functions
+-- Utility Functions
 local function newTracerLine()
     local line = Drawing.new("Line")
     line.Color = Color3.fromRGB(255, 0, 0)
@@ -280,178 +282,285 @@ local function worldToScreen(pos)
     return Vector2.new(vec.X, vec.Y), vec.Z > 0
 end
 
-local function destroyTracerData(data)
-    if data.tracer then 
-        data.tracer:Remove() 
-    end
+local function destroyTracer(data)
+    if data.tracer then data.tracer:Remove() end
 end
 
--- Box ESP functions
-local function CreateBoxESP(player)
-    if player == LocalPlayer then return end
-    
+local function ForceHideESP(esp)
+    if esp.Box then esp.Box.Visible = false end
+    if esp.Outline then esp.Outline.Visible = false end
+    if esp.NameTag then esp.NameTag.Visible = false end
+end
+
+-- Player Box ESP
+local function CreatePlayerBoxESP(player)
+    if player == LocalPlayer or PlayerBoxESPObjects[player] then return end
     local Box = Drawing.new("Square")
     Box.Filled = true
     Box.Thickness = 1.5
     Box.Visible = false
-    
+    Box.Transparency = 1
+
     local Outline = Drawing.new("Square")
     Outline.Filled = false
     Outline.Thickness = 3
-    Outline.Color = Color3.fromRGB(0, 0, 0)
+    Outline.Color = Color3.fromRGB(0,0,0)
     Outline.Visible = false
-    
+    Outline.Transparency = 1
+
     local NameTag = Drawing.new("Text")
-    NameTag.Size = BoxSettings.TextSize
+    NameTag.Size = ESPSettings.TextSize
     NameTag.Center = true
-    NameTag.Outline = BoxSettings.TextOutline
+    NameTag.Outline = ESPSettings.TextOutline
     NameTag.Font = Drawing.Fonts.UI
     NameTag.Visible = false
-    
-    BoxESPObjects[player] = {Box = Box, Outline = Outline, NameTag = NameTag}
+    NameTag.Transparency = 1
+
+    PlayerBoxESPObjects[player] = {Box = Box, Outline = Outline, NameTag = NameTag}
 end
 
-local function RemoveBoxESP(player)
-    if BoxESPObjects[player] then
-        BoxESPObjects[player].Box:Remove()
-        BoxESPObjects[player].Outline:Remove()
-        BoxESPObjects[player].NameTag:Remove()
-        BoxESPObjects[player] = nil
+local function RemovePlayerBoxESP(player)
+    local esp = PlayerBoxESPObjects[player]
+    if esp then
+        pcall(function()
+            esp.Box:Remove()
+            esp.Outline:Remove()
+            esp.NameTag:Remove()
+        end)
+        PlayerBoxESPObjects[player] = nil
     end
 end
 
--- Main unified update loop
+-- Nextbot ESP
+local function CreateNextbotESP(nextbot)
+    if NextbotESPObjects[nextbot] then return end
+    local Box = Drawing.new("Square")
+    Box.Filled = true
+    Box.Thickness = 1.5
+    Box.Visible = false
+    Box.Transparency = 1
+
+    local Outline = Drawing.new("Square")
+    Outline.Filled = false
+    Outline.Thickness = 3
+    Outline.Color = Color3.fromRGB(0,0,0)
+    Outline.Visible = false
+    Outline.Transparency = 1
+
+    local NameTag = Drawing.new("Text")
+    NameTag.Size = ESPSettings.TextSize
+    NameTag.Center = true
+    NameTag.Outline = ESPSettings.TextOutline
+    NameTag.Font = Drawing.Fonts.UI
+    NameTag.Visible = false
+    NameTag.Transparency = 1
+
+    NextbotESPObjects[nextbot] = {Box = Box, Outline = Outline, NameTag = NameTag}
+end
+
+local function RemoveNextbotESP(nextbot)
+    local esp = NextbotESPObjects[nextbot]
+    if esp then
+        pcall(function()
+            esp.Box:Remove()
+            esp.Outline:Remove()
+            esp.NameTag:Remove()
+        end)
+        NextbotESPObjects[nextbot] = nil
+    end
+end
+
+-- Main Update Loop
 local function UpdateAllESP()
     local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localHRP then return end
-    
+    if not localHRP then 
+        for _, esp in pairs(PlayerBoxESPObjects) do ForceHideESP(esp) end
+        for _, esp in pairs(NextbotESPObjects) do ForceHideESP(esp) end
+        return 
+    end
+
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    
-    -- Update Box ESP
-    if BoxESPEnabled then
-        for player, esp in pairs(BoxESPObjects) do
-            local char = player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            local hum = char and char:FindFirstChild("Humanoid")
-            
-            if hrp and hum and hum.Health > 0 and char.Parent then
-                local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                
-                if onScreen and (not BoxSettings.TeamCheck or player.Team ~= LocalPlayer.Team) then
-                    -- Apply settings
-                    esp.Box.Color = BoxSettings.BoxColor
-                    esp.Box.Transparency = BoxSettings.BoxTransparency
-                    esp.Outline.Transparency = BoxSettings.OutlineTransparency
-                    esp.NameTag.Color = BoxSettings.TextColor
-                    esp.NameTag.Transparency = BoxSettings.TextTransparency
-                    esp.NameTag.Size = BoxSettings.TextSize
-                    
-                    -- Calculate box size
-                    local headPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 4.5, 0))
-                    local footPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 4, 0))
-                    local height = math.abs(headPos.Y - footPos.Y) * BoxSettings.HeightMultiplier
-                    local width = height * BoxSettings.WidthRatio
-                    
-                    esp.Box.Size = Vector2.new(width, height)
-                    esp.Box.Position = Vector2.new(rootPos.X - width / 2, rootPos.Y - height / 2)
-                    esp.Outline.Size = esp.Box.Size
-                    esp.Outline.Position = esp.Box.Position
-                    
-                    -- Name + distance
-                    local distance = math.floor((localHRP.Position - hrp.Position).Magnitude)
-                    esp.NameTag.Text = string.format("%s\n[%dm]", player.Name, distance)
-                    esp.NameTag.Position = Vector2.new(rootPos.X, rootPos.Y - height / 2 - 25)
-                    
-                    esp.Box.Visible = true
-                    esp.Outline.Visible = true
-                    esp.NameTag.Visible = true
-                else
-                    esp.Box.Visible = false
-                    esp.Outline.Visible = false
-                    esp.NameTag.Visible = false
+
+    -- PLAYER BOX ESP
+    for player, esp in pairs(PlayerBoxESPObjects) do ForceHideESP(esp) end
+    if PlayerBoxESPEnabled then
+        for player, esp in pairs(PlayerBoxESPObjects) do
+            if player ~= LocalPlayer then
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChild("Humanoid")
+
+                if hrp and hum and hum.Health > 0 and char.Parent and (not ESPSettings.TeamCheck or player.Team ~= LocalPlayer.Team) then
+                    local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                    if onScreen then
+                        esp.Box.Color = ESPSettings.BoxColor
+                        esp.Box.Transparency = ESPSettings.BoxTransparency
+                        esp.Outline.Transparency = ESPSettings.OutlineTransparency
+                        esp.NameTag.Color = ESPSettings.TextColor
+                        esp.NameTag.Transparency = ESPSettings.TextTransparency
+                        esp.NameTag.Size = ESPSettings.TextSize
+
+                        local headPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 4.5, 0))
+                        local footPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 4, 0))
+                        local height = math.abs(headPos.Y - footPos.Y) * ESPSettings.HeightMultiplier
+                        local width = height * ESPSettings.WidthRatio
+
+                        esp.Box.Size = Vector2.new(width, height)
+                        esp.Box.Position = Vector2.new(rootPos.X - width / 2, rootPos.Y - height / 2)
+                        esp.Outline.Size = esp.Box.Size
+                        esp.Outline.Position = esp.Box.Position
+
+                        local distance = math.floor((localHRP.Position - hrp.Position).Magnitude)
+                        esp.NameTag.Text = string.format("%s\n[%dm]", player.Name, distance)
+                        esp.NameTag.Position = Vector2.new(rootPos.X, rootPos.Y - height / 2 - 25)
+
+                        esp.Box.Visible = true
+                        esp.Outline.Visible = true
+                        esp.NameTag.Visible = true
+                    end
                 end
-            else
-                esp.Box.Visible = false
-                esp.Outline.Visible = false
-                esp.NameTag.Visible = false
             end
-        end
-    else
-        -- Hide all box ESP when disabled
-        for _, esp in pairs(BoxESPObjects) do
-            esp.Box.Visible = false
-            esp.Outline.Visible = false
-            esp.NameTag.Visible = false
         end
     end
-    
-    -- Update Tracers (ALWAYS INDEPENDENT)
-    if TracerEnabled then
+
+    -- DOWNED TRACERS & NEXTBOT ESP
+    if MiscESPEnabled then
+        -- Downed Tracers
         for _, player in pairs(Players:GetPlayers()) do
-            if player == LocalPlayer then continue end
-            
-            local char = player.Character
-            if not char or not char:FindFirstChild("HumanoidRootPart") then continue end
-            
-            local hrp = char.HumanoidRootPart
-            
-            -- Check if downed
-            if char:GetAttribute("Downed") then
-                local data = TracerCache[player.Name]
-                if not data then
-                    data = {tracer = newTracerLine()}
-                    TracerCache[player.Name] = data
-                end
-                
-                local root2D, onScreen = worldToScreen(hrp.Position)
-                data.tracer.From = center
-                data.tracer.To = root2D
-                data.tracer.Visible = onScreen
-            else
-                if TracerCache[player.Name] then
-                    destroyTracerData(TracerCache[player.Name])
-                    TracerCache[player.Name] = nil
+            if player ~= LocalPlayer then
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+                if hrp and char:GetAttribute("Downed") then
+                    local data = DownedTracerCache[player.Name]
+                    if not data then
+                        data = {tracer = newTracerLine()}
+                        DownedTracerCache[player.Name] = data
+                    end
+
+                    local root2D, onScreen = worldToScreen(hrp.Position)
+                    data.tracer.From = center
+                    data.tracer.To = root2D
+                    data.tracer.Visible = onScreen
+                else
+                    if DownedTracerCache[player.Name] then
+                        destroyTracer(DownedTracerCache[player.Name])
+                        DownedTracerCache[player.Name] = nil
+                    end
                 end
             end
         end
-        
-        -- Cleanup removed players
-        for name, data in pairs(TracerCache) do
-            if not Players:FindFirstChild(name) then
-                destroyTracerData(data)
-                TracerCache[name] = nil
+
+        -- Nextbot ESP
+        for _, esp in pairs(NextbotESPObjects) do ForceHideESP(esp) end
+        local nextbotsFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Nextbots")
+        if nextbotsFolder then
+            for _, nextbot in pairs(nextbotsFolder:GetChildren()) do
+                if nextbot:IsA("Model") then
+                    local rootPart = nextbot:FindFirstChild("HumanoidRootPart") or nextbot:FindFirstChildWhichIsA("BasePart")
+                    if rootPart and nextbot.Parent then
+                        if not NextbotESPObjects[nextbot] then CreateNextbotESP(nextbot) end
+                        local esp = NextbotESPObjects[nextbot]
+                        local rootPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+                        if onScreen then
+                            esp.Box.Color = ESPSettings.BoxColor
+                            esp.Box.Transparency = ESPSettings.BoxTransparency
+                            esp.Outline.Transparency = ESPSettings.OutlineTransparency
+                            esp.NameTag.Color = ESPSettings.TextColor
+                            esp.NameTag.Transparency = ESPSettings.TextTransparency
+                            esp.NameTag.Size = ESPSettings.TextSize
+
+                            local headPos = Camera:WorldToViewportPoint(rootPart.Position + Vector3.new(0, 4.5, 0))
+                            local footPos = Camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 4, 0))
+                            local height = math.abs(headPos.Y - footPos.Y) * ESPSettings.HeightMultiplier
+                            local width = height * ESPSettings.WidthRatio
+
+                            esp.Box.Size = Vector2.new(width, height)
+                            esp.Box.Position = Vector2.new(rootPos.X - width / 2, rootPos.Y - height / 2)
+                            esp.Outline.Size = esp.Box.Size
+                            esp.Outline.Position = esp.Box.Position
+
+                            local distance = math.floor((localHRP.Position - rootPart.Position).Magnitude)
+                            esp.NameTag.Text = string.format("%s\n[%dm]", nextbot.Name, distance)
+                            esp.NameTag.Position = Vector2.new(rootPos.X, rootPos.Y - height / 2 - 25)
+
+                            esp.Box.Visible = true
+                            esp.Outline.Visible = true
+                            esp.NameTag.Visible = true
+                        end
+                    end
+                end
             end
         end
     else
-        -- Hide all tracers when disabled
-        for _, data in pairs(TracerCache) do
-            if data.tracer then data.tracer.Visible = false end
+        for _, data in pairs(DownedTracerCache) do if data.tracer then data.tracer.Visible = false end end
+        for _, esp in pairs(NextbotESPObjects) do ForceHideESP(esp) end
+    end
+
+    -- Cleanup
+    for name, data in pairs(DownedTracerCache) do
+        if not Players:FindFirstChild(name) then
+            destroyTracer(data)
+            DownedTracerCache[name] = nil
+        end
+    end
+    for nextbot, _ in pairs(NextbotESPObjects) do
+        local rootPart = nextbot:IsA("Model") and (nextbot:FindFirstChild("HumanoidRootPart") or nextbot:FindFirstChildWhichIsA("BasePart"))
+        if not nextbot.Parent or not rootPart then
+            RemoveNextbotESP(nextbot)
         end
     end
 end
 
--- Initialize ESP for existing players
+-- Initialize
 for _, player in pairs(Players:GetPlayers()) do
-    CreateBoxESP(player)
+    CreatePlayerBoxESP(player)
+    player.CharacterAdded:Connect(function()
+        task.wait(0.1)
+        CreatePlayerBoxESP(player)
+    end)
 end
 
 Players.PlayerAdded:Connect(function(player)
+    CreatePlayerBoxESP(player)
     player.CharacterAdded:Connect(function()
         task.wait(0.1)
-        CreateBoxESP(player)
+        CreatePlayerBoxESP(player)
     end)
-    CreateBoxESP(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    RemoveBoxESP(player)
-    if TracerCache[player.Name] then
-        destroyTracerData(TracerCache[player.Name])
-        TracerCache[player.Name] = nil
+    RemovePlayerBoxESP(player)
+    if DownedTracerCache[player.Name] then
+        destroyTracer(DownedTracerCache[player.Name])
+        DownedTracerCache[player.Name] = nil
     end
 end)
 
--- Main render loop
+-- Monitor Nextbots
+local function setupNextbotMonitoring()
+    local nextbotsFolder = workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Nextbots")
+    if nextbotsFolder then
+        for _, nextbot in pairs(nextbotsFolder:GetChildren()) do
+            if nextbot:IsA("Model") then CreateNextbotESP(nextbot) end
+        end
+        nextbotsFolder.ChildAdded:Connect(function(nextbot)
+            if nextbot:IsA("Model") then CreateNextbotESP(nextbot) end
+        end)
+        nextbotsFolder.ChildRemoved:Connect(function(nextbot)
+            RemoveNextbotESP(nextbot)
+        end)
+    end
+end
+
+workspace.ChildAdded:Connect(function(child)
+    if child.Name == "Game" then
+        task.wait(0.6)
+        setupNextbotMonitoring()
+    end
+end)
+setupNextbotMonitoring()
+
 RunService.RenderStepped:Connect(UpdateAllESP)
 
 -- ====================== KEYBINDS ======================
@@ -459,48 +568,48 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     
     if input.KeyCode == Enum.KeyCode.Insert then
-        BoxESPEnabled = not BoxESPEnabled
-        print("Box ESP:", BoxESPEnabled and "ON" or "OFF")
+        PlayerBoxESPEnabled = not PlayerBoxESPEnabled
+        print("Player Box ESP:", PlayerBoxESPEnabled and "ON" or "OFF")
         
     elseif input.KeyCode == Enum.KeyCode.Delete then
-        TracerEnabled = not TracerEnabled
-        print("Tracers:", TracerEnabled and "ON" or "OFF")
+        MiscESPEnabled = not MiscESPEnabled
+        print("Tracers + Nextbot ESP:", MiscESPEnabled and "ON" or "OFF")
         
     elseif input.KeyCode == Enum.KeyCode.C then
         ColorIndex = (ColorIndex % #Colors) + 1
-        BoxSettings.BoxColor = Colors[ColorIndex]
+        ESPSettings.BoxColor = Colors[ColorIndex]
         print("Box Color:", ColorNames[ColorIndex])
         
-    elseif input.KeyCode == Enum.KeyCode.LeftBracket then -- [
-        BoxSettings.BoxTransparency = math.max(0, BoxSettings.BoxTransparency - 0.05)
-        print("Box Trans:", string.format("%.2f", BoxSettings.BoxTransparency))
+    elseif input.KeyCode == Enum.KeyCode.LeftBracket then
+        ESPSettings.BoxTransparency = math.max(0, ESPSettings.BoxTransparency - 0.05)
+        print("Box Trans:", string.format("%.2f", ESPSettings.BoxTransparency))
         
-    elseif input.KeyCode == Enum.KeyCode.RightBracket then -- ]
-        BoxSettings.BoxTransparency = math.min(1, BoxSettings.BoxTransparency + 0.05)
-        print("Box Trans:", string.format("%.2f", BoxSettings.BoxTransparency))
+    elseif input.KeyCode == Enum.KeyCode.RightBracket then
+        ESPSettings.BoxTransparency = math.min(1, ESPSettings.BoxTransparency + 0.05)
+        print("Box Trans:", string.format("%.2f", ESPSettings.BoxTransparency))
         
-    elseif input.KeyCode == Enum.KeyCode.Comma then -- ,
-        BoxSettings.WidthRatio = math.max(0.1, BoxSettings.WidthRatio - 0.05)
-        print("Width:", string.format("%.2f", BoxSettings.WidthRatio))
+    elseif input.KeyCode == Enum.KeyCode.Comma then
+        ESPSettings.WidthRatio = math.max(0.1, ESPSettings.WidthRatio - 0.05)
+        print("Width:", string.format("%.2f", ESPSettings.WidthRatio))
         
-    elseif input.KeyCode == Enum.KeyCode.Period then -- .
-        BoxSettings.WidthRatio = math.min(2, BoxSettings.WidthRatio + 0.05)
-        print("Width:", string.format("%.2f", BoxSettings.WidthRatio))
+    elseif input.KeyCode == Enum.KeyCode.Period then
+        ESPSettings.WidthRatio = math.min(2, ESPSettings.WidthRatio + 0.05)
+        print("Width:", string.format("%.2f", ESPSettings.WidthRatio))
         
-    elseif input.KeyCode == Enum.KeyCode.Slash then -- /
-        BoxSettings.HeightMultiplier = math.max(0.5, BoxSettings.HeightMultiplier - 0.05)
-        print("Height:", string.format("%.2f", BoxSettings.HeightMultiplier))
+    elseif input.KeyCode == Enum.KeyCode.Slash then
+        ESPSettings.HeightMultiplier = math.max(0.5, ESPSettings.HeightMultiplier - 0.05)
+        print("Height:", string.format("%.2f", ESPSettings.HeightMultiplier))
         
-    elseif input.KeyCode == Enum.KeyCode.Quote then -- '
-        BoxSettings.HeightMultiplier = math.min(2, BoxSettings.HeightMultiplier + 0.05)
-        print("Height:", string.format("%.2f", BoxSettings.HeightMultiplier))
+    elseif input.KeyCode == Enum.KeyCode.Quote then
+        ESPSettings.HeightMultiplier = math.min(2, ESPSettings.HeightMultiplier + 0.05)
+        print("Height:", string.format("%.2f", ESPSettings.HeightMultiplier))
         
     elseif input.KeyCode == Enum.KeyCode.T then
-        BoxSettings.TeamCheck = not BoxSettings.TeamCheck
-        print("TeamCheck:", BoxSettings.TeamCheck)
+        ESPSettings.TeamCheck = not ESPSettings.TeamCheck
+        print("TeamCheck:", ESPSettings.TeamCheck)
     end
 end)
 
 print("=== ALL FEATURES LOADED SUCCESSFULLY! ===")
-print("INSERT = Box ESP | DELETE = Tracers | C = Colors | [ ] = Trans | ,. = Width | /' = Height | T = Team")
-print("✓ Timer | ✓ Box ESP | ✓ Downed Tracers - ALL WORKING!")
+print("INSERT = Player Box ESP | DELETE = Tracers + Nextbot ESP | C = Colors | [ ] = Trans | ,. = Width | /' = Height | T = Team")
+print("✓ Timer | ✓ Player Box ESP (Red, See-Through) | ✓ Downed Tracers | ✓ Nextbot ESP (Red, See-Through)")
