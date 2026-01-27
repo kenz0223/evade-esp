@@ -604,7 +604,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         ESPSettings.HeightMultiplier = math.min(2, ESPSettings.HeightMultiplier + 0.05)
         print("Height:", string.format("%.2f", ESPSettings.HeightMultiplier))
         
-    elseif input.KeyCode == Enum.KeyCode.T then
+    elseif input.KeyCode == Enum.KeyCode.X then
         ESPSettings.TeamCheck = not ESPSettings.TeamCheck
         print("TeamCheck:", ESPSettings.TeamCheck)
     end
